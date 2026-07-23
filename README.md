@@ -3,9 +3,9 @@
 C++ NatNet receiver for OptiTrack Motive rigid-body streaming.
 
 - Library target: `mocap_natnet`
-- Public header: `include/MoCapParser/NatNetClient.hpp`
-- Implementation: `include/MoCapParser/NatNetClient.cpp`
-- Example executable: `src/mocap_reader_main.cpp`
+- Reader executable: `mocap_reader`
+- Logger executable: `mocap_go2_box_logger`
+- Public headers: `include/MoCapParser/`
 
 ## Dependencies
 
@@ -13,25 +13,26 @@ C++ NatNet receiver for OptiTrack Motive rigid-body streaming.
 - C++17 compiler
 - Eigen3
 - Linux UDP socket API / pthreads
+- Python 3 + NumPy + Matplotlib, only for reading and plotting `.npz` logs
 
 Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install cmake g++ libeigen3-dev
+sudo apt install cmake g++ libeigen3-dev python3-numpy python3-matplotlib
 ```
 
-No OptiTrack NatNet SDK is required. The client parses NatNet UDP packets directly.
+No OptiTrack NatNet SDK is required.
 
 ## Motive Setup
 
-In Motive, enable NatNet streaming:
+In Motive:
 
 - `Streaming > NatNet > Enable`: ON
 - `Rigid Bodies`: ON
 - `Transmission Type`: match `use_multicast` in `config/natnet.conf`
-- `Local Interface`: select the Motive PC network interface connected to the Linux PC
-- `Up Axis`: use `Z Up` if downstream robotics code expects Z-up data
+- `Local Interface`: select the Motive PC interface connected to the Linux PC
+- `Up Axis`: use `Z Up` if downstream code expects Z-up data
 
 Default NatNet ports:
 
@@ -40,7 +41,7 @@ Default NatNet ports:
 
 ## Config
 
-The executable reads `config/natnet.conf` by default.
+Default file: `config/natnet.conf`
 
 ```conf
 use_multicast=false
@@ -57,28 +58,23 @@ Fields:
 - `server_address`: Motive Windows PC IP
 - `local_address`: Linux PC IP on the same network. Use `0.0.0.0` to listen on all interfaces
 - `use_multicast`: `false` for Unicast, `true` for Multicast
-- `rigid_body_id`: comma-separated Motive rigid-body IDs to read
+- `rigid_body_id`: comma-separated Motive rigid-body IDs
 - `rigid_body_name`: local labels matched by order with `rigid_body_id`
 
 ## Linux Firewall
 
-NatNet uses UDP. If Motive handshakes but frame data does not arrive, allow UDP `1510` and `1511` on the Linux PC.
+NatNet uses UDP. If the handshake works but frame data does not arrive, allow UDP `1510` and `1511` on Linux.
 
-Check whether `ufw` is active:
+For `ufw`:
 
 ```bash
 sudo ufw status verbose
-```
-
-Allow NatNet UDP ports with `ufw`:
-
-```bash
 sudo ufw allow 1510/udp
 sudo ufw allow 1511/udp
 sudo ufw reload
 ```
 
-If the system uses `firewalld`:
+For `firewalld`:
 
 ```bash
 sudo firewall-cmd --permanent --add-port=1510/udp
@@ -86,39 +82,101 @@ sudo firewall-cmd --permanent --add-port=1511/udp
 sudo firewall-cmd --reload
 ```
 
-If neither firewall manager is used, inspect raw rules:
+For raw `iptables` inspection:
 
 ```bash
 sudo iptables -S
 sudo iptables -L -n -v
 ```
 
-Temporary test rule with `iptables`:
+Temporary `iptables` test rule:
 
 ```bash
 sudo iptables -I INPUT -p udp --dport 1510 -j ACCEPT
 sudo iptables -I INPUT -p udp --dport 1511 -j ACCEPT
 ```
 
-To confirm packets are reaching Linux:
+Check whether packets reach Linux:
 
 ```bash
 sudo tcpdump -ni any udp port 1510 or udp port 1511
 ```
 
-## Build / Run
+## Build
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+```
+
+## Live Reader
+
+```bash
 ./build/mocap_reader config/natnet.conf --verbose
 ```
 
-CLI overrides:
+CLI override:
 
 ```bash
-./build/mocap_reader config/natnet.conf --id 4,5 --multicast 0 --verbose
+./build/mocap_reader config/natnet.conf --id 6,7 --multicast 0 --verbose
 ```
+
+Verbose output rows are: name/id, status, position `[x y z]`, quaternion `[w x y z]`.
+
+## Go2 / Box1 NPZ Logger
+
+The logger writes every received NatNet frame for go2/box1 to `demo/go2-box/*.npz`.
+
+```bash
+./build/mocap_go2_box_logger config/natnet.conf
+```
+
+Stop with Ctrl+C. The NPZ file is written when the process exits.
+
+Explicit ID override:
+
+```bash
+./build/mocap_go2_box_logger config/natnet.conf --box-id 6 --go2-id 7
+```
+
+An `.npz` file is a zip bundle of NumPy arrays. Inspect and plot a log with:
+
+```bash
+python3 scripts/read_go2_box_npz.py demo/go2-box/go2_box_YYYYMMDD_HHMMSS.npz --list-keys
+```
+
+If the file path is omitted, the script reads the latest `.npz` in `demo/go2-box`:
+
+```bash
+python3 scripts/read_go2_box_npz.py
+```
+
+The script saves a top-view figure next to the `.npz` file:
+
+```text
+demo/go2-box/go2_box_YYYYMMDD_HHMMSS_top_view.png
+```
+
+Plot options:
+
+```bash
+python3 scripts/read_go2_box_npz.py --axis-interval 20 --axis-scale 0.15
+python3 scripts/read_go2_box_npz.py --no-plot
+```
+
+The plot uses the streamed Z-up convention: top view is the world `x-y` plane.
+World `x` is red, world `y` is blue. Body axes are drawn every `--axis-interval` samples.
+
+Saved arrays:
+
+- `time_seconds`: logger time from start, shape `(N,)`
+- `frame_number`: NatNet frame number, shape `(N,)`
+- `go2_position`, `box1_position`: `[x y z]`, shape `(N, 3)`
+- `go2_quaternion_wxyz`, `box1_quaternion_wxyz`: `[w x y z]`, shape `(N, 4)`
+- `go2_valid`, `box1_valid`: `1` if that rigid body was present in the logged frame
+- `go2_rigid_body_id`, `box1_rigid_body_id`: IDs used for logging
+
+Missing rigid bodies are saved as `NaN` with valid flag `0`.
 
 ## C++ Usage
 
@@ -128,53 +186,22 @@ CLI overrides:
 mocap_subscriber::NatNetConfig cfg;
 cfg.server_address = "192.168.0.189";
 cfg.local_address = "0.0.0.0";
-cfg.rigid_body_ids = {4, 5};
-cfg.rigid_body_names = {"robot", "box1"};
+cfg.rigid_body_ids = {6, 7};
+cfg.rigid_body_names = {"box1", "go2"};
 
 mocap_subscriber::NatNetClient client(cfg);
 client.start();
 
-if (auto pose = client.latestPoseById(4)) {
+if (auto pose = client.latestPoseById(7)) {
     Eigen::Vector3d p = pose->position;
-    Eigen::Quaterniond q = pose->orientation;  // w, x, y, z
+    Eigen::Quaterniond q = pose->orientation;
 }
 
-bool fresh = client.isPoseFresh(4, std::chrono::milliseconds(250));
+bool fresh = client.isPoseFresh(7, std::chrono::milliseconds(250));
 ```
 
-Callback usage:
+Notes:
 
-```cpp
-client.setPoseCallback([](const mocap_subscriber::Pose& pose) {
-    // Copy pose into your controller, logger, estimator, etc.
-});
-```
-
-## Runtime Output
-
-Default mode prints connection messages only. Use `--verbose` for live diagnostics:
-
-```text
-frame= 2537416 packets=6858 frames=6857 seen_ids=[7]
-box1(id=6)                                             | go2(id=7)
-waiting                                                | matched fresh=yes
-[-- -- --]                                             | [1.0920 0.2949 0.0688]
-[-- -- -- --]                                          | [0.9962 0.0000 0.0000 -0.0872]
-```
-
-Rows are: name/id, status, position `[x y z]`, quaternion `[w x y z]`.
-
-Useful diagnostics:
-
-- `packets=0`: no NatNet UDP packets are reaching this process
-- `packets>0, frames=0`: packets arrive, but frame parsing is failing
-- `seen_ids=[...]`: rigid-body IDs observed in recent frames
-- If the desired ID is missing from `seen_ids`, update `rigid_body_id`
-- The client keeps the last valid pose; it does not reset stale data to zero
-- Use `isPoseFresh(id, max_age)` before using a pose in control code
-
-## Notes
-
-- The live frame stream is ID-based. `rigid_body_name` is only a local display label.
+- The live frame stream is ID-based. `rigid_body_name` is only a local label.
 - Quaternions use Eigen order: `(w, x, y, z)`.
 - If Motive streams `Z Up`, do not apply another coordinate transform in code.

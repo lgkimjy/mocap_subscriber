@@ -20,6 +20,7 @@ find_package(Threads REQUIRED)
 
 add_library(mocap_natnet STATIC
     include/MoCapParser/NatNetClient.cpp
+    include/MoCapParser/NpzWriter.cpp
 )
 
 target_include_directories(mocap_natnet
@@ -45,7 +46,13 @@ add_executable(mocap_reader
 
 target_link_libraries(mocap_reader PRIVATE mocap_natnet)
 
-install(TARGETS mocap_natnet mocap_reader
+add_executable(mocap_go2_box_logger
+    src/mocap_go2_box_logger_main.cpp
+)
+
+target_link_libraries(mocap_go2_box_logger PRIVATE mocap_natnet)
+
+install(TARGETS mocap_natnet mocap_reader mocap_go2_box_logger
     EXPORT mocap_subscriberTargets
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin

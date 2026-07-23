@@ -68,4 +68,5 @@ vcpkg_installed/
 Testing/
 .cache/
 
+# custom igore dir and file type
 references/
